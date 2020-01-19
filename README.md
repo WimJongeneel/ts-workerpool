@@ -1,6 +1,6 @@
 # A Workerpool in TypeScript and Node
 
-This repository is part of this article: TODO 
+This repository is part an [https://itnext.io/a-workerpool-from-scratch-in-typescript-and-node-c4352106ffde?source=friends_link&sk=96f50c4fab122cf141287276af7e9ea8](article) on [ITNEXT](https://itnext.io). 
 
 ## Setup and running
 
