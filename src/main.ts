@@ -1,13 +1,13 @@
 import { Worker } from 'worker_threads'
 
-interface Task<a> {
-  runAsync(): Promise<a>
-  map<b>(f: (a: a) => b): Task<b>
-  then<b>(f: (a: a) => Task<b>): Task<b>
+interface Task<data, result> {
+  runAsync(data: data): Promise<result>
+  map<result2>(f: (o: result) => result2): Task<data, result2>
+  then<result2>(f: Task<result, result2>): Task<data, result2>
 }
 
 interface WorkerPool {
-  createTask<a>(f: () => a): Task<a>
+  createTask<data, result>(f: (d: data) => result): Task<data, result>
   terminate(): Promise<void>
 }
 
@@ -21,27 +21,27 @@ const createWorkerpool = (options: WorkerPoolOptions): WorkerPool => {
     return [w.threadId, w]
   }))
   const idle = Array.from(workers.keys())
-  const resolvers = new Map<number, (data: any) => void>()
-  let backlog: { id: number, task: () => void }[] = []
+  const resolvers = new Map<number, (data: any) => any>()
+  const backlog: { id: number, task: (data: any) => void, data: any }[] = []
   let taskIdCounter = 0
   let terminating = false
 
   const runNext = () => {
-    if (terminating) return
-    if (backlog.length == 0) return
-    if (idle.length == 0) return
+    if(terminating) return
+    if (backlog.length == 0 || idle.length == 0) return
     const task = backlog.shift()
     const worker = idle.shift()
     console.log(`scheduling ${task.id} on ${worker}`)
-    const msg = "exec::" + task.id + "::" + task.task
+    const msg = { ...task, task: task.task.toString() }
     workers.get(worker).postMessage(msg)
     runNext()
   }
 
   workers.forEach((w, i) => {
     w.on('message', data => {
-      const [_, id, res] = data.split('::')
-      resolvers.get(Number(id))(res)
+      const { id, result } = data
+      console.log('res', result)
+      resolvers.get(Number(id))(result)
       resolvers.delete(id)
       idle.push(i)
       runNext()
@@ -49,26 +49,26 @@ const createWorkerpool = (options: WorkerPoolOptions): WorkerPool => {
   })
 
   return {
-    createTask<a>(f): Task<a> {
+    createTask<data, result>(f): Task<data, result> {
       return {
-        runAsync(): Promise<a> {
+        runAsync(data: data): Promise<result> {
           if (terminating) return Promise.reject(new Error('Workerpool is terminating'))
           taskIdCounter += 1
-          backlog.push({ id: taskIdCounter, task: f })
-          const p = new Promise<a>(r => resolvers.set(taskIdCounter, r))
+          backlog.push({ id: taskIdCounter, task: f, data })
+          const p = new Promise<result>(r => resolvers.set(taskIdCounter, r))
           runNext()
           return p
         },
-        map<b>(f: (a: a) => b): Task<b> {
+        map<result2>(f: (r: result) => result2): Task<data, result2> {
           return {
             ...this,
             runAsync: () => this.runAsync().then(f)
           }
         },
-        then<b>(f: (a: a) => Task<b>): Task<b> {
+        then<result2>(t: Task<result, result2>): Task<data, result2> {
           return {
             ...this,
-            runAsync: () => this.runAsync().then(a => f(a).runAsync())
+            runAsync: (d) => this.runAsync(d).then(a => t.runAsync(a))
           }
         }
       }
@@ -87,64 +87,11 @@ const createWorkerpool = (options: WorkerPoolOptions): WorkerPool => {
 }
 
 const pool = createWorkerpool({ workers: 5 })
-
-console.log('creating tasks')
-pool
-  .createTask(() => 'hello world')
-  .then(s => pool.createTask(() => 'after'))
-  .runAsync()
-  .then(console.log)
-
-pool
-  .createTask(() => 'hello world')
-  .map(s => s + s)
-  .runAsync()
-  .then(console.log)
-
-console.log('start terminating')
-// pool.terminate().then(() => console.log('terminated'))
-
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 500)
-
-
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 500)
-
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 1000)
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 1000)
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 1000)
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 1000)
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 1000)
-
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 1500)
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 2000)
-// setTimeout(() => {
-//   pool.createTask(() => 'hello world').runAsync()
-//     .then(console.log)
-// }, 2500)
+const task = (n: number) => {
+  const fibonacci = n => (n < 2) ? n : fibonacci(n - 2) + fibonacci(n - 1)
+  return fibonacci(n)
+}
+pool.createTask(task)
+  .then(pool.createTask(res => res * 2))
+  .then(pool.createTask(res => 'res is: ' + res.toString()))
+  .runAsync(30).then(console.log)
